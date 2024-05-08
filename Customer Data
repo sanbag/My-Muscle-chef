@@ -1,0 +1,31 @@
+
+#we can create table using pyspark or pandas and make table in big query (Data ware house)
+import pandas as pd
+from google.cloud import bigquery
+
+# Define the file path
+file_path = r"C:\Users\sandh\Desktop\My Muscle Chef\Customer.xls"
+
+# Read the Excel file into a DataFrame using Pandas
+df = pd.read_excel(file_path)
+
+# Set up BigQuery client for loading data
+client = bigquery.Client.from_service_account_json(
+    r"C:\Users\sandh\Desktop\My Muscle Chef\key.json"
+)
+
+# Define the destination dataset and table in BigQuery
+dataset_id = "My_muscle_chef"
+table_id = "customer"
+
+# Create the destination table (if it doesn't exist)
+table_ref = client.dataset(dataset_id).table(table_id)
+table = bigquery.Table(table_ref, schema=df.dtypes.to_dict())
+client.create_table(table, exists_ok=True)  
+# Set exists_ok=True to avoid errors if table exists
+
+# Load data from DataFrame to BigQuery
+job = client.load_table_from_dataframe(df, table_ref)
+job.result()  # Wait for the job to complete
+
+print(f"Data loaded to BigQuery table: {dataset_id}.{table_id}")
