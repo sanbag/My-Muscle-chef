@@ -1,0 +1,69 @@
+# 1. the total amount spent and the country for the Pending delivery status for each country.
+
+SELECT sh.Country, SUM(o.Amount) AS total_spent
+FROM `my_muscle_chef.Shippings.shippings` sh
+INNER JOIN `my_muscle_chef.Orders.orders` o ON sh.Customer_ID = o.Customer_ID
+INNER JOIN `my_muscle_chef.Customer.customer` c ON o.Customer_ID = c.CustomerID
+WHERE sh.Status = 'Pending'
+GROUP BY sh.Country
+ORDER BY total_spent DESC;
+
+# 2. the total number of transactions, total quantity sold, and total amount spent for each customer, along with the product details.
+SELECT c.CustomerID, c.First_Name, c.Last_Name, o.Item,
+       SUM(o.Quantity) AS quantity_sold, SUM(o.Amount) AS total_spent
+FROM `my_muscle_chef.Customer.customer` c
+INNER JOIN `my_muscle_chef.Orders.orders` o ON c.CustomerID = o.Customer_ID
+GROUP BY c.CustomerID, c.First_Name, c.Last_Name, o.Item
+ORDER BY c.CustomerID, total_spent DESC;
+
+or
+
+SELECT c.CustomerID, c.First_Name, c.Last_Name, COUNT(*) AS num_transactions,
+       SUM(o.Quantity) AS total_quantity_sold, SUM(o.Amount) AS total_spent,
+       STRING_AGG(o.Item, ', ') AS product_details
+FROM `my_muscle_chef.Customer.customer` c
+INNER JOIN `my_muscle_chef.Orders.orders` o ON c.CustomerID = o.Customer_ID
+GROUP BY c.CustomerID, c.First_Name, c.Last_Name
+ORDER BY total_spent DESC;
+
+# 3. the maximum product purchased for each country.
+
+WITH order_items AS (
+  SELECT o.Order_ID, o.Item, o.Quantity, c.Country
+  FROM `my_muscle_chef.Orders.orders` o
+  INNER JOIN `my_muscle_chef.Customer.customer` c ON o.Customer_ID = c.CustomerID
+)
+SELECT oi.Country, oi.Item, MAX(oi.Quantity) AS max_quantity
+FROM order_items oi
+GROUP BY oi.Country, oi.Item
+ORDER BY oi.Country, max_quantity DESC;
+
+# 4. the most purchased product based on the age category less than 30 and above 30.
+
+WITH customer_orders AS (
+  SELECT c.Age, o.Item, SUM(o.Quantity) AS quantity_purchased
+  FROM `my_muscle_chef.Customer.customer` c
+  INNER JOIN `my_muscle_chef.Orders.orders` o ON c.CustomerID = o.Customer_ID
+  GROUP BY c.Age, o.Item
+)
+SELECT
+  CASE WHEN Age < 30 THEN 'Less than 30' ELSE 'Above 30' END AS age_category,
+  Item, MAX(quantity_purchased) AS max_quantity
+FROM customer_orders
+GROUP BY age_category, Item
+ORDER BY age_category, max_quantity DESC;
+
+# 5. the country that had minimum transactions and sales amount.
+
+WITH country_orders AS (
+  SELECT c.Country, COUNT(*) AS num_transactions, SUM(o.Amount) AS total_sales
+  FROM `my_muscle_chef.Customer.customer` c
+  INNER JOIN `my_muscle_chef.Orders.orders` o ON c.CustomerID = o.Customer_ID
+  GROUP BY c.Country
+)
+SELECT Country
+FROM country_orders
+ORDER BY num_transactions ASC, total_sales ASC
+LIMIT 1;
+
+
