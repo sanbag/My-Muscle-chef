@@ -1,31 +1,62 @@
-
-#we can create table using pyspark or pandas and make table in big query (Data ware house)
+# Import libraries
 import pandas as pd
 from google.cloud import bigquery
 
-# Define the file path
-file_path = r"C:\Users\sandh\Desktop\My Muscle Chef\Customer.xls"
+# Set credentials (replace with your path to JSON key)
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = "/path/to/your/key.json"
 
-# Read the Excel file into a DataFrame using Pandas
-df = pd.read_excel(file_path)
+# Read Customers data
+try:
+  df_customers = pd.read_excel("Customers.xls")
+except FileNotFoundError:
+  print("Error: Customers.xls file not found. Please check the file path.")
+  exit()
 
-# Set up BigQuery client for loading data
-client = bigquery.Client.from_service_account_json(
-    r"C:\Users\sandh\Desktop\My Muscle Chef\key.json"
-)
+# Rename columns
+df_customers = df_customers.rename(columns={"First": "First_Name", "Last": "Last_Name"})
 
-# Define the destination dataset and table in BigQuery
-dataset_id = "My_muscle_chef"
+# Basic data cleaning 
+try:
+  # Attempt to convert CustomerID to integer
+  df_customers["CustomerID"] = pd.to_numeric(df_customers["CustomerID"], errors='coerce')
+  df_customers.dropna(subset=["CustomerID"], inplace=True)  # Remove rows with missing or invalid CustomerID
+except pd.errors.ParserError:
+  print("Error: CustomerID column contains non-numeric values. Please check data format.")
+
+# Define BigQuery client
+client = bigquery.Client()
+
+# Set dataset and table names (replace with your desired names)
+dataset_id = "Customer"
 table_id = "customer"
 
-# Create the destination table (if it doesn't exist)
+# Define schema (replace with actual data types from your file)
+schema = [
+    bigquery.SchemaField("CustomerID", bigquery.INTEGER), 
+    bigquery.SchemaField("First_Name", bigquery.STRING),
+    bigquery.SchemaField("Last_Name", bigquery.STRING),
+    bigquery.SchemaField("Age", bigquery.INTEGER),  
+    bigquery.SchemaField("Country", bigquery.STRING),
+]
+
+# Create table if it doesn't exist
 table_ref = client.dataset(dataset_id).table(table_id)
-table = bigquery.Table(table_ref, schema=df.dtypes.to_dict())
-client.create_table(table, exists_ok=True)  
-# Set exists_ok=True to avoid errors if table exists
+table = bigquery.Table(table_ref, schema=schema)
+try:
+  client.create_table(table) if not client.get_table(table_ref) else None
+except google.api_core.exceptions.Conflict:
+  print(f"Table {dataset_id}.{table_id} already exists. Skipping table creation.")
 
-# Load data from DataFrame to BigQuery
-job = client.load_table_from_dataframe(df, table_ref)
-job.result()  # Wait for the job to complete
+# Upload data to BigQuery
+job_config = bigquery.LoadJobConfig()
+job_config.write_disposition = bigquery.WriteDisposition.WRITE_APPEND  # Append data
 
-print(f"Data loaded to BigQuery table: {dataset_id}.{table_id}")
+try:
+  load_job = client.load_table_from_dataframe(
+      df_customers, table_ref, job_config=job_config
+  )
+  load_job.result()  # This will raise an exception if errors occur
+except google.cloud.exceptions.BadRequest:
+  print("Error: Error uploading data to BigQuery. Please check data format and schema.")
+
+print(f"Customers data uploaded to BigQuery: {dataset_id}.{table_id}")
