@@ -1,0 +1,77 @@
+
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField
+from google.cloud import bigquery
+
+# Set credentials 
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = "/path/to/your/key.json"
+
+# Create SparkSession
+try:
+  spark = SparkSession.builder.appName("OrdersData").getOrCreate()
+except Exception as e:
+  print("Error creating SparkSession:", e)
+  exit()
+
+# Read Orders data
+try:
+  df_orders = spark.read.csv("Orders.csv", header=True) 
+except FileNotFoundError:
+  print("Error: Orders.csv file not found. Please check the file path.")
+  spark.stop()
+  exit()
+
+# Basic data cleaning 
+try:
+  # Attempt to convert OrderID, Amount to numerics (handle errors)
+  df_orders = df_orders.withColumn("Order_ID", df_orders["Order_ID"].cast("integer"))
+  df_orders = df_orders.withColumn("Amount", df_orders["Amount"].cast("double"))
+  df_orders.dropna(subset=["Order_ID", "Customer_ID"], how="any", inplace=True)  # Remove rows with missing IDs
+except pd.errors.ParserError:
+  print("Error: OrderID or Amount column contains non-numeric values. Please check data format.")
+
+# Define schema
+schema = [
+    StructField("Order_ID", StructType(["int"])), 
+    StructField("Item", StructType(["string"])),
+    StructField("Amount", StructType(["float"])),  
+    StructField("Customer_ID", StructType(["string"])),
+]
+
+# Create DataFrame with schema
+df_orders = df_orders.select(*schema)
+
+# Define BigQuery client
+try:
+  client = bigquery.Client()
+except google.auth.exceptions.exceptions.DefaultCredentialsError:
+  print("Error: Could not authenticate with BigQuery. Please check service account credentials.")
+  spark.stop()
+  exit()
+
+# Set dataset and table names (replace with your desired names)
+dataset_id = "Orders"
+table_id = "orders"
+
+# Create table if it doesn't exist
+table_ref = client.dataset(dataset_id).table(table_id)
+table = bigquery.Table(table_ref, schema=schema)
+try:
+  client.create_table(table) if not client.get_table(table_ref) else None
+except google.api_core.exceptions.Conflict:
+  print(f"Table {dataset_id}.{table_id} already exists. Skipping table creation.")
+
+# Write data to BigQuery
+try:
+  df_orders.write.format("bigquery") \
+      .option("temporaryGcpPath", f"gs://your-bucket/staging") \
+      .option("writeDisposition", "WRITE_APPEND") \
+      .saveAsTable(f"{dataset_id}.{table_id}")
+except Exception as e:
+  print("Error writing data to BigQuery:", e)
+
+# Stop SparkSession
+spark.stop()
+
+print(f"Orders data uploaded to BigQuery: {dataset_id}.{table_id}")
