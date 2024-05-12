@@ -1,0 +1,78 @@
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField
+from pyspark.sql.functions import col
+from google.cloud import bigquery
+
+# Set credentials 
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = "/path/to/your/key.json"
+
+# Create SparkSession
+try:
+  spark = SparkSession.builder.appName("ShippingsData").getOrCreate()
+except Exception as e:
+  print("Error creating SparkSession:", e)
+  exit()
+
+# Read Shippings data (assuming JSON format)
+try:
+  df_shippings = spark.read.json("Shippings.json")
+except FileNotFoundError:
+  print("Error: Shippings.json file not found. Please check the file path.")
+  spark.stop()
+  exit()
+
+# Define schema
+schema = [
+    StructField("Shipping_ID", StructType(["int"])),  
+    StructField("Status", StructType(["string"])),
+    StructField("Customer_ID", StructType(["int"])), 
+]
+
+# Validate schema (optional)
+if not df_shippings.schema == schema:
+  print("Error: Data schema does not match expected schema.")
+  spark.stop()
+  exit()
+
+# Attempt to cast Customer_ID to integer (handle errors)
+try:
+  df_shippings = df_shippings.withColumn("Customer_ID", col("Customer_ID").cast("integer"))
+except pd.errors.ParserError:
+  print("Error: Customer_ID column contains non-numeric values. Please check data format.")
+  spark.stop()
+  exit()
+
+# Define BigQuery client
+try:
+  client = bigquery.Client()
+except google.auth.exceptions.exceptions.DefaultCredentialsError:
+  print("Error: Could not authenticate with BigQuery. Please check service account credentials.")
+  spark.stop()
+  exit()
+
+# Set dataset and table names (replace with your desired names)
+dataset_id = "Shippings"
+table_id = "shippings"
+
+# Create table if it doesn't exist
+table_ref = client.dataset(dataset_id).table(table_id)
+table = bigquery.Table(table_ref, schema=schema)
+try:
+  client.create_table(table) if not client.get_table(table_ref) else None
+except google.api_core.exceptions.Conflict:
+  print(f"Table {dataset_id}.{table_id} already exists. Skipping table creation.")
+
+# Write data to BigQuery
+try:
+  df_shippings.write.format("bigquery") \
+      .option("temporaryGcpPath", f"gs://your-bucket/staging") \
+      .option("writeDisposition", "WRITE_APPEND") \
+      .saveAsTable(f"{dataset_id}.{table_id}")
+except Exception as e:
+  print("Error writing data to BigQuery:", e)
+
+# Stop SparkSession
+spark.stop()
+
+print(f"Shippings data uploaded to BigQuery: {dataset_id}.{table_id}")
